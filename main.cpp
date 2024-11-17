@@ -4,20 +4,20 @@
 
     #include <chrono>
 
-static constexpr size_t TxAntNum = 8;
-static constexpr size_t RxAntNum = 8;
+static constexpr size_t TxAntNum = 32;
+static constexpr size_t RxAntNum = 32;
 
-using QAM = QAM16<float>;
+using QAM = QAM64<float>;
 
 int main()
 {
 
-    int sample = 1000;
+    int sample = 10000;
 
     auto det = Detection<Rx<RxAntNum>, Tx<TxAntNum>, Mod<QAM>>();
-    det.setSNR(18);
+    det.setSNR(24);
 
-    auto mcts = OptiMISD<Rx<RxAntNum>, Tx<TxAntNum>, Mod<QAM>>(4000,4, 3);
+    auto mcts = OptiMISD<Rx<RxAntNum>, Tx<TxAntNum>, Mod<QAM>>(4000,4, 0.8);
 
 
     int err_frames = 0;
@@ -26,6 +26,7 @@ int main()
 
     for (int i = 0; i < sample; i++)
     {
+ 
         det.generate();
 
         auto list = mcts.execute(det);
@@ -33,6 +34,8 @@ int main()
         auto err = det.judge(list);
 
         err_frames += err > 0;
+
+
         err_bits += err;
     }
 

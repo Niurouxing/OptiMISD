@@ -102,11 +102,29 @@ public:
         // z = Q' * RxSymbol;
         z = (Q.transpose() * det.RxSymbols);
 
+        // if (flag)
+        // {
+        //     std::cout << "QR: " << std::endl;
+        //     std::cout << R << std::endl;
+        //     std::cout << "z: " << std::endl;
+        //     std::cout << z << std::endl;
+        //     std::cout << "real Tx: " << std::endl;
+        //     std::cout << det.TxSymbols << std::endl;
+        // }
+
         bool play_exit = false;
         PrecInput max_PED_allowed = r * det.Nv * 2 * det.TxAntNum;
 
+        auto& root_node = nodes[0];
+
+
         for (int playout = 0; playout < max_playout; playout++)
         {
+            // if(flag && playout == max_playout - 1)
+            // {
+            //     int a =1;
+            // }
+
             auto *current_node = &nodes[0];
 
             int step = 0;
@@ -140,8 +158,7 @@ public:
 
                             auto &child_node = nodes[current_node->child_indices[i]];
 
-                            PrecInput ucb = child_node.score + c * std::sqrt(std::log(1 + current_node->visited_times)) / (std::powf(2, std::floor(std::log2(1 + child_node.visited_times))) ); 
-\
+                            PrecInput ucb = child_node.score + c * std::sqrt(std::log(1 + current_node->visited_times)) / (std::powf(2, std::floor(std::log2(1 + child_node.visited_times))));
 
                             if (ucb > max_ucb)
                             {
@@ -176,6 +193,7 @@ public:
 
                 // calculate the play with least PED of the current node, and the PED must not exceed the maxPEDAllowed
                 int best_play = -1;
+                int play_left = 0;
                 PrecInput best_PED = 1e9;
 
                 for (int i = 0; i < ConSize; i++)
@@ -195,7 +213,12 @@ public:
                     {
                         PrecInput candidate_PED = std::abs(shared_part - ModType::symbolsRD[i] * R(2 * TxAntNum - 1 - step, 2 * TxAntNum - 1 - step));
 
-                        if (candidate_PED < best_PED && candidate_PED < PED_left)
+                        if (candidate_PED < PED_left)
+                        {
+                            play_left++;
+                        }
+
+                        if (candidate_PED < best_PED)
                         {
                             best_PED = candidate_PED;
                             best_play = i;
@@ -203,16 +226,29 @@ public:
                     }
                 }
 
-                current_node->full_expanded = best_play == -1;
+                current_node->full_expanded = play_left <=1;
 
-                if (best_play != -1)
+                if (play_left == 0)
+                {
+                    score_backuped = current_node->score;
+
+                    // back propagation
+                    for (int i = 0; i < step; i++)
+                    {
+                        if (score_backuped > nodes[accumulated_node_indices[i]].score)
+                        {
+                            nodes[accumulated_node_indices[i]].score = score_backuped;
+                        }
+                    }
+                }
+                else
                 {
                     accumulated_node_data[step] = ModType::symbolsRD[best_play];
 
                     current_node->child_indices[current_node->saved_child_num] = nodes.size();
                     current_node->saved_child_num++;
 
-                    nodes.emplace_back(current_node->PED + best_PED, accumulated_node_data[step], /*visited_times=*/1);
+                    nodes.emplace_back(current_node->PED + best_PED, accumulated_node_data[step], /*visited_times=*/0);
 
                     // 更新 current_node
                     current_node = &nodes.back();
@@ -226,8 +262,8 @@ public:
                     // specialization for expand == 1
                     if constexpr (expand == 1)
                     {
-                        // get the PED of the current node and add the PED of the best play
-                        PrecInput PED = current_node->PED + best_PED;
+                     
+                        PrecInput PED =  current_node->PED;
 
                         // greedly select the child node with the least PED until the end of the game
                         for (int i = step + 1; i < game_length; i++)
@@ -258,7 +294,7 @@ public:
                             int saved_child_num = (i != game_length - 1) ? 1 : 0;
                             int child_index = (saved_child_num == 1) ? nodes.size() + 1 : -1;
 
-                            nodes.emplace_back(PED, accumulated_node_data[i], /*visited_times=*/1, saved_child_num, child_index);
+                            nodes.emplace_back(PED, accumulated_node_data[i], /*visited_times=*/0, saved_child_num, child_index);
 
                             accumulated_node_indices[i] = nodes.size() - 1;
                         }
@@ -277,7 +313,7 @@ public:
                             }
                         }
 
-                        continue;
+                        // continue;
                     }
                     else
                     {
@@ -285,9 +321,35 @@ public:
                     }
                 }
             }
+
+            root_node.visited_times++;
         }
 
         // search the tree, find the child with the highest score, store the symbol in accumulatedNodeData
+
+        // if (flag)
+        // {
+        //     for (int i = 0; i < nodes.size(); i++)
+        //     {
+        //         // find the closest symbol index in the symbolRD
+        //         int sym_index = -1;
+        //         for (int j = 0; j < ConSize; j++)
+        //         {
+        //             if (std::abs(ModType::symbolsRD[j] - nodes[i].node_data) < 1e-6)
+        //             {
+        //                 sym_index = j;
+        //                 break;
+        //             }
+        //         }
+
+        //         std::cout << "node " << i << " score " << nodes[i].score << " nodeData " << sym_index << " childrenNum " << nodes[i].saved_child_num << " fullExpanded " << nodes[i].full_expanded << " nodesVisitTimes " << nodes[i].visited_times << " children ";
+        //         for (int j = 0; j < nodes[i].saved_child_num; j++)
+        //         {
+        //             std::cout << nodes[i].child_indices[j] << " ";
+        //         }
+        //         std::cout << std::endl;
+        //     }
+        // }
 
         std::array<PrecInput, game_length> res;
 
