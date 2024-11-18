@@ -9,15 +9,15 @@
 template <typename QAM, typename PrecInput>
 struct Node
 {
-    PrecInput PED;                                        // 节点的代价值
-    PrecInput score;                                      // 节点的分数
-    std::array<int, QAM::symbolsRD.size()> child_indices; // 子节点的索引，-1 表示未初始化
+    PrecInput PED;
+    PrecInput score;
+    std::array<int, QAM::symbolsRD.size()> child_indices;
 
-    int saved_child_num; // 已经保存的子节点数量
-    int visited_times;   // 访问次数
-    bool full_expanded;  // 是否已经扩展完毕
+    int saved_child_num;
+    int visited_times;
+    bool full_expanded;
 
-    PrecInput node_data; // 存储于节点的符号
+    PrecInput node_data;
 
     // 默认构造函数
     Node()
@@ -50,10 +50,6 @@ public:
     static inline constexpr size_t ConSize = ModType::symbolsRD.size();
 
     // QR decomposition
-    Eigen::Matrix<PrecInput, 2 * RxAntNum, 2 * RxAntNum> bQ;
-    Eigen::Matrix<PrecInput, 2 * RxAntNum, 2 * TxAntNum> bR;
-
-    Eigen::Matrix<PrecInput, 2 * RxAntNum, 2 * TxAntNum> Q;
     Eigen::Matrix<PrecInput, 2 * TxAntNum, 2 * TxAntNum> R;
 
     Eigen::Vector<PrecInput, 2 * TxAntNum> z;
@@ -71,6 +67,9 @@ public:
     std::array<int, game_length> accumulated_node_indices;
     std::array<PrecInput, game_length> accumulated_node_data;
 
+    std::vector<PrecInput> c_sqrt_log_LUT;
+    std::vector<PrecInput> log2_div_LUT;
+
     OptiMISD_s(int max_playout, PrecInput c, PrecInput r)
     {
         this->max_playout = max_playout;
@@ -78,9 +77,16 @@ public:
         this->r = r;
 
         nodes.reserve(100000);
-
-        // 创建一个空的根节点
         nodes.emplace_back();
+
+        c_sqrt_log_LUT.resize(max_playout + 1);
+        log2_div_LUT.resize(max_playout + 1);
+
+        for (int i = 0; i <= max_playout; i++)
+        {
+            c_sqrt_log_LUT[i] = c * std::sqrt(std::log(1 + i));
+            log2_div_LUT[i] = 1 / (std::powf(2, std::floor(std::log2(1 + i))));
+        }
     }
 
     auto execute(const auto &det)
@@ -90,17 +96,37 @@ public:
 
         const auto &H = det.H;
 
-        // QR decomposition
-        Eigen::HouseholderQR<Eigen::Matrix<PrecInput, 2 * RxAntNum, 2 * TxAntNum>> qr(H);
-        bQ = qr.householderQ();
-        bR = qr.matrixQR().template triangularView<Eigen::Upper>();
+        // // QR decomposition
+        // Eigen::HouseholderQR<Eigen::Matrix<PrecInput, 2 * RxAntNum, 2 * TxAntNum>> qr(H);
+        // bQ = qr.householderQ();
+        // bR = qr.matrixQR().template triangularView<Eigen::Upper>();
 
-        // slice and multiply
-        Q = bQ.leftCols(2 * TxAntNum);
-        R = bR.topRows(2 * TxAntNum);
+        // // slice and multiply
+        // Q = bQ.leftCols(2 * TxAntNum);
+        // R = bR.topRows(2 * TxAntNum);
 
-        // z = Q' * RxSymbol;
-        z = (Q.transpose() * det.RxSymbols);
+        // // z = Q' * RxSymbol;
+        // z = (Q.transpose() * det.RxSymbols);
+
+        if constexpr (TxAntNum == RxAntNum)
+        {
+            // no need to slice Q and R in such scenario
+            Eigen::HouseholderQR<Eigen::Matrix<PrecInput, 2 * RxAntNum, 2 * TxAntNum>> qr(H);
+
+            R = qr.matrixQR().template triangularView<Eigen::Upper>();
+            z = qr.householderQ().transpose() * det.RxSymbols;
+        }
+        else
+        {
+            Eigen::HouseholderQR<Eigen::Matrix<PrecInput, 2 * RxAntNum, 2 * TxAntNum>> qr(H);
+            Eigen::Matrix<PrecInput, 2 * RxAntNum, 2 * TxAntNum> bQ = qr.householderQ();
+            Eigen::Matrix<PrecInput, 2 * TxAntNum, 2 * TxAntNum> bR = qr.matrixQR().template triangularView<Eigen::Upper>();
+
+            Eigen::Matrix<PrecInput, 2 * RxAntNum, 2 * TxAntNum> Q = bQ.leftCols(2 * TxAntNum);
+            R = bR.topRows(2 * TxAntNum);
+
+            z = (Q.transpose() * det.RxSymbols);
+        }
 
         // if (flag)
         // {
@@ -115,8 +141,9 @@ public:
         bool play_exit = false;
         PrecInput max_PED_allowed = r * det.Nv * 2 * det.TxAntNum;
 
-        auto& root_node = nodes[0];
+        auto &root_node = nodes[0];
 
+        int possible_node_num = 1;
 
         for (int playout = 0; playout < max_playout; playout++)
         {
@@ -158,7 +185,8 @@ public:
 
                             auto &child_node = nodes[current_node->child_indices[i]];
 
-                            PrecInput ucb = child_node.score + c * std::sqrt(std::log(1 + current_node->visited_times)) / (std::powf(2, std::floor(std::log2(1 + child_node.visited_times))));
+                            // PrecInput ucb = child_node.score + c * std::sqrt(std::log(1 + current_node->visited_times)) / (std::powf(2, std::floor(std::log2(1 + child_node.visited_times))));
+                            PrecInput ucb = child_node.score + c_sqrt_log_LUT[current_node->visited_times] * log2_div_LUT[child_node.visited_times];
 
                             if (ucb > max_ucb)
                             {
@@ -226,7 +254,8 @@ public:
                     }
                 }
 
-                current_node->full_expanded = play_left <=1;
+                current_node->full_expanded = play_left <= 1;
+                possible_node_num -= play_left <= 1;
 
                 if (play_left == 0)
                 {
@@ -262,8 +291,8 @@ public:
                     // specialization for expand == 1
                     if constexpr (expand == 1)
                     {
-                     
-                        PrecInput PED =  current_node->PED;
+
+                        PrecInput PED = current_node->PED;
 
                         // greedly select the child node with the least PED until the end of the game
                         for (int i = step + 1; i < game_length; i++)
@@ -303,6 +332,8 @@ public:
 
                         // back propagation
 
+                        possible_node_num += game_length - step - 1;
+
                         // update the score for all the nodes in accumulated_node_indices
                         for (int i = 0; i < game_length; i++)
                         {
@@ -317,12 +348,18 @@ public:
                     }
                     else
                     {
-                        // not implemented, leave this for future work
+                        // not implemented, an ugly implementation is located in the old cython code
                     }
                 }
             }
 
             root_node.visited_times++;
+
+            if (possible_node_num == 0)
+            {
+                play_exit = true;
+                break;
+            }
         }
 
         // search the tree, find the child with the highest score, store the symbol in accumulatedNodeData
