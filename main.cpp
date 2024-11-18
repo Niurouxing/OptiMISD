@@ -15,9 +15,9 @@ int main()
     int sample = 1000;
 
     auto det = Detection<Rx<RxAntNum>, Tx<TxAntNum>, Mod<QAM>>();
-    det.setSNR(37);
+    det.setSNR(31);
 
-    auto mcts = OptiMISD<Rx<RxAntNum>, Tx<TxAntNum>, Mod<QAM>>(8000,8, 0.5);
+    auto mcts = OptiMISD<Rx<RxAntNum>, Tx<TxAntNum>, Mod<QAM>>(8000,8, 0.2);
 
 
     int err_frames = 0;

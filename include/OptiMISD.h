@@ -85,7 +85,7 @@ public:
         for (int i = 0; i <= max_playout; i++)
         {
             c_sqrt_log_LUT[i] = c * std::sqrt(std::log(1 + i));
-            log2_div_LUT[i] = 1 / (std::powf(2, std::floor(std::log2(1 + i))));
+            log2_div_LUT[i] = 1 / (std::pow(2, std::floor(std::log2(1 + i))));
         }
     }
 
@@ -353,7 +353,7 @@ public:
                 }
             }
 
-            root_node.visited_times++;
+            nodes[0].visited_times++;
 
             if (possible_node_num == 0)
             {

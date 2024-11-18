@@ -2,6 +2,7 @@
 #include <Eigen/Dense>
 #include <iostream>
 #include <random>
+#include <bitset>
 
 // 初始化随机数生成器
 // inline static std::mt19937 gen(std::random_device{}());
