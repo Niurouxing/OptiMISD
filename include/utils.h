@@ -5,8 +5,13 @@
 #include <bitset>
 
 // 初始化随机数生成器
-// inline static std::mt19937 gen(std::random_device{}());
-inline static std::mt19937 gen(0);
+inline static std::mt19937 gen;
+// inline static std::mt19937 gen(0);
+
+inline void set_random_seed(unsigned int seed) {
+    gen.seed(seed);
+}
+
 
 // 均匀分布整数
 template <int min, int max>
@@ -177,10 +182,27 @@ public:
     Eigen::Vector<size_t, 2 * TxAntNum> TxIndices;
     Eigen::Vector<PrecType, 2 * TxAntNum> TxSymbols;
     Eigen::Vector<PrecType, 2 * RxAntNum> RxSymbols;
-    Eigen::Matrix<PrecType, 2 * RxAntNum, 2 * TxAntNum> H;
+    // Eigen::Matrix<PrecType, 2 * RxAntNum, 2 * TxAntNum> H;
+
+    static constexpr bool heapAlloc = TxAntNum * RxAntNum > 128 * 128;
+
+    // if TxAntNum * RxAntNum >= 128 * 128, use dynamic allocation
+    using H_type = std::conditional_t<heapAlloc,
+                                      Eigen::Matrix<PrecType, Eigen::Dynamic, Eigen::Dynamic>,
+                                      Eigen::Matrix<PrecType, 2 * RxAntNum, 2 * TxAntNum>>;
+
+    H_type H;
 
     double Nv = 1;
     double sqrtNvDiv2 = std::sqrt(Nv / 2);
+
+    Detection_s()
+    {
+        if constexpr (heapAlloc)
+        {
+            H.resize(2 * RxAntNum, 2 * TxAntNum);
+        }
+    }
 
     void setSNR(double SNRdB)
     {

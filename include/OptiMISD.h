@@ -50,7 +50,13 @@ public:
     static inline constexpr size_t ConSize = ModType::symbolsRD.size();
 
     // QR decomposition
-    Eigen::Matrix<PrecInput, 2 * TxAntNum, 2 * TxAntNum> R;
+    // Eigen::Matrix<PrecInput, 2 * TxAntNum, 2 * TxAntNum> R;
+    static constexpr bool heapAlloc = TxAntNum * RxAntNum > 128 * 128;
+    using R_type = std::conditional_t<heapAlloc,
+                                      Eigen::Matrix<PrecInput, Eigen::Dynamic, Eigen::Dynamic>,
+                                      Eigen::Matrix<PrecInput, 2 * TxAntNum, 2 * TxAntNum>>;
+
+    R_type R;
 
     Eigen::Vector<PrecInput, 2 * TxAntNum> z;
 
@@ -87,6 +93,11 @@ public:
             c_sqrt_log_LUT[i] = c * std::sqrt(std::log(1 + i));
             log2_div_LUT[i] = 1 / (std::pow(2, std::floor(std::log2(1 + i))));
         }
+
+        if constexpr (heapAlloc)
+        {
+            R.resize(2 * TxAntNum, 2 * TxAntNum);
+        }
     }
 
     auto execute(const auto &det)
@@ -97,46 +108,49 @@ public:
         const auto &H = det.H;
 
         // // QR decomposition
-        // Eigen::HouseholderQR<Eigen::Matrix<PrecInput, 2 * RxAntNum, 2 * TxAntNum>> qr(H);
-        // bQ = qr.householderQ();
-        // bR = qr.matrixQR().template triangularView<Eigen::Upper>();
-
-        // // slice and multiply
-        // Q = bQ.leftCols(2 * TxAntNum);
-        // R = bR.topRows(2 * TxAntNum);
-
-        // // z = Q' * RxSymbol;
-        // z = (Q.transpose() * det.RxSymbols);
-
         if constexpr (TxAntNum == RxAntNum)
         {
             // no need to slice Q and R in such scenario
-            Eigen::HouseholderQR<Eigen::Matrix<PrecInput, 2 * RxAntNum, 2 * TxAntNum>> qr(H);
+            if (heapAlloc)
+            {
+                Eigen::HouseholderQR<Eigen::Matrix<PrecInput, Eigen::Dynamic, Eigen::Dynamic>> qr(H);
 
-            R = qr.matrixQR().template triangularView<Eigen::Upper>();
-            z = qr.householderQ().transpose() * det.RxSymbols;
+                R = qr.matrixQR().template triangularView<Eigen::Upper>();
+                z = qr.householderQ().transpose() * det.RxSymbols;
+            }
+            else
+            {
+                Eigen::HouseholderQR<Eigen::Matrix<PrecInput, 2 * RxAntNum, 2 * TxAntNum>> qr(H);
+
+                R = qr.matrixQR().template triangularView<Eigen::Upper>();
+                z = qr.householderQ().transpose() * det.RxSymbols;
+            }
         }
         else
         {
-            Eigen::HouseholderQR<Eigen::Matrix<PrecInput, 2 * RxAntNum, 2 * TxAntNum>> qr(H);
-            Eigen::Matrix<PrecInput, 2 * RxAntNum, 2 * TxAntNum> bQ = qr.householderQ();
-            Eigen::Matrix<PrecInput, 2 * TxAntNum, 2 * TxAntNum> bR = qr.matrixQR().template triangularView<Eigen::Upper>();
+            if (heapAlloc)
+            {
+                Eigen::HouseholderQR<Eigen::Matrix<PrecInput, Eigen::Dynamic, Eigen::Dynamic>> qr(H);
+                Eigen::Matrix<PrecInput, Eigen::Dynamic, Eigen::Dynamic> bQ = qr.householderQ();
+                Eigen::Matrix<PrecInput, Eigen::Dynamic, Eigen::Dynamic> bR = qr.matrixQR().template triangularView<Eigen::Upper>();
 
-            Eigen::Matrix<PrecInput, 2 * RxAntNum, 2 * TxAntNum> Q = bQ.leftCols(2 * TxAntNum);
-            R = bR.topRows(2 * TxAntNum);
+                Eigen::Matrix<PrecInput, Eigen::Dynamic, Eigen::Dynamic> Q = bQ.leftCols(2 * TxAntNum);
+                R = bR.topRows(2 * TxAntNum);
 
-            z = (Q.transpose() * det.RxSymbols);
+                z = (Q.transpose() * det.RxSymbols);
+            }
+            else
+            {
+                Eigen::HouseholderQR<Eigen::Matrix<PrecInput, 2 * RxAntNum, 2 * TxAntNum>> qr(H);
+                Eigen::Matrix<PrecInput, 2 * RxAntNum, 2 * RxAntNum> bQ = qr.householderQ();
+                Eigen::Matrix<PrecInput, 2 * RxAntNum, 2 * TxAntNum> bR = qr.matrixQR().template triangularView<Eigen::Upper>();
+
+                Eigen::Matrix<PrecInput, 2 * RxAntNum, 2 * TxAntNum> Q = bQ.leftCols(2 * TxAntNum);
+                R = bR.topRows(2 * TxAntNum);
+
+                z = (Q.transpose() * det.RxSymbols);
+            }
         }
-
-        // if (flag)
-        // {
-        //     std::cout << "QR: " << std::endl;
-        //     std::cout << R << std::endl;
-        //     std::cout << "z: " << std::endl;
-        //     std::cout << z << std::endl;
-        //     std::cout << "real Tx: " << std::endl;
-        //     std::cout << det.TxSymbols << std::endl;
-        // }
 
         bool play_exit = false;
         PrecInput max_PED_allowed = r * det.Nv * 2 * det.TxAntNum;
@@ -147,11 +161,6 @@ public:
 
         for (int playout = 0; playout < max_playout; playout++)
         {
-            // if(flag && playout == max_playout - 1)
-            // {
-            //     int a =1;
-            // }
-
             auto *current_node = &nodes[0];
 
             int step = 0;
@@ -363,30 +372,6 @@ public:
         }
 
         // search the tree, find the child with the highest score, store the symbol in accumulatedNodeData
-
-        // if (flag)
-        // {
-        //     for (int i = 0; i < nodes.size(); i++)
-        //     {
-        //         // find the closest symbol index in the symbolRD
-        //         int sym_index = -1;
-        //         for (int j = 0; j < ConSize; j++)
-        //         {
-        //             if (std::abs(ModType::symbolsRD[j] - nodes[i].node_data) < 1e-6)
-        //             {
-        //                 sym_index = j;
-        //                 break;
-        //             }
-        //         }
-
-        //         std::cout << "node " << i << " score " << nodes[i].score << " nodeData " << sym_index << " childrenNum " << nodes[i].saved_child_num << " fullExpanded " << nodes[i].full_expanded << " nodesVisitTimes " << nodes[i].visited_times << " children ";
-        //         for (int j = 0; j < nodes[i].saved_child_num; j++)
-        //         {
-        //             std::cout << nodes[i].child_indices[j] << " ";
-        //         }
-        //         std::cout << std::endl;
-        //     }
-        // }
 
         std::array<PrecInput, game_length> res;
 
