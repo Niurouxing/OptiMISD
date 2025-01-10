@@ -3,7 +3,7 @@ Requiring C++23 features, GCC > 13.0 or Clang > 19.0 is recommended for building
 And check your cmake version for supporting C++23.
 
 ```bash
-$ git clone https://github.com/Niurouxing/OptiMISD.git
+$ git clone https://github.com/Niurouxing/OptiMISD.git --recursive
 $ cd OptiMISD
 $ mkdir build
 $ cd build
